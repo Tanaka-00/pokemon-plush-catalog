@@ -1,0 +1,65 @@
+name: Refresh stock status
+
+on:
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch current in-stock JAN codes and rebuild stock.json
+        run: |
+          python3 - <<'PYEOF'
+          import re
+          import json
+          import urllib.request
+          from datetime import datetime, timezone
+
+          BASE = "https://www.pokemoncenter-online.com/plush-toys/plush/?inStock=1&page={}"
+          HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; PlushCatalogStockBot/1.0)"}
+
+          def fetch(page):
+              req = urllib.request.Request(BASE.format(page), headers=HEADERS)
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return resp.read().decode("utf-8", errors="replace")
+
+          html1 = fetch(1)
+          m = re.search(r'class="num">/\s*(\d+)</span>', html1)
+          total = int(m.group(1)) if m else 0
+          page_count = max(1, -(-total // 40))  # ceil div
+
+          jans = set(re.findall(r'(\d{13})\.html', html1))
+          for p in range(2, page_count + 1):
+              html = fetch(p)
+              jans.update(re.findall(r'(\d{13})\.html', html))
+
+          data = {
+              "inStock": sorted(jans),
+              "lastUpdated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+
+          with open("stock.json", "w", encoding="utf-8") as f:
+              json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+
+          print(f"Total reported: {total}, pages fetched: {page_count}, distinct JANs: {len(jans)}")
+          PYEOF
+
+      - name: Commit and push if changed
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "github-actions"
+          if git diff --quiet stock.json; then
+            echo "No stock changes."
+          else
+            git add stock.json
+            git commit -m "Refresh stock status"
+            git push
+          fi
