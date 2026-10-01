@@ -185,6 +185,8 @@
   .orderCode{font-family:ui-monospace,Consolas,monospace;font-size:19px;font-weight:800;letter-spacing:.05em;background:var(--accent);color:var(--accent-ink);padding:5px 12px;border-radius:6px;display:inline-block}
   .tSteps{margin:8px 0;padding-left:20px;font-size:13px;display:grid;gap:4px}
   .discordBtn{display:block;text-align:center;padding:11px 14px;border-radius:999px;background:#5865f2;color:#fff;font-weight:800;text-decoration:none}
+  #discordJoinBtn{background:transparent;color:#5865f2;border:2px solid #5865f2;margin-bottom:6px}
+  @media (prefers-color-scheme: dark){ #discordJoinBtn{color:#a5adff;border-color:#a5adff} }
   .partBtns{display:grid;gap:6px;margin-top:8px}
   .partBtns button{padding:9px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;cursor:pointer}
   .minOrderNotice{
@@ -261,10 +263,12 @@
       <div id="ticketSteps" hidden>
         <div class="orderCode" id="orderCode"></div>
         <ol class="tSteps">
+          <li>New to our Discord? <a id="discordJoin" target="_blank" rel="noopener">Join the server first</a>.</li>
           <li>Open <strong>#create-ticket</strong> in our Discord.</li>
           <li>Tap <strong>Create ticket</strong>. Already have an open ticket with us? Use that one instead.</li>
           <li>Paste your order in the ticket<span id="partNote"></span>.</li>
         </ol>
+        <a class="discordBtn" id="discordJoinBtn" target="_blank" rel="noopener">Join our Discord ↗</a>
         <a class="discordBtn" id="discordBtn" target="_blank" rel="noopener">Open #create-ticket in Discord ↗</a>
         <div id="partBtns" class="partBtns"></div>
       </div>
@@ -4708,6 +4712,8 @@ function updateMinOrderNotice(total){
 }
 
 const DISCORD_TICKET_URL = "https://discord.com/channels/1494195048559018084/1494226693865472020";
+// The channel link above only opens for existing members; first-time customers join via the invite.
+const DISCORD_INVITE_URL = "https://discord.gg/yZVqqrFjE";
 function orderCodeGen(){const a="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let r="";for(let i=0;i<4;i++)r+=a[Math.floor(Math.random()*a.length)];const d=new Date();return `PKP-${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${r}`}
 function buildOrderLines(code, who){
   const ids = Object.keys(cart).filter(id => cart[id] > 0 && byId(id));
@@ -4732,6 +4738,8 @@ async function copyText(text){
 const dcName=document.getElementById("dcName"), dcCountry=document.getElementById("dcCountry");
 try{const w=JSON.parse(localStorage.getItem("pkp-who")||"null");if(w){dcName.value=w.d||"";dcCountry.value=w.c||""}}catch(e){}
 document.getElementById("discordBtn").href=DISCORD_TICKET_URL;
+document.getElementById("discordJoinBtn").href=DISCORD_INVITE_URL;
+document.getElementById("discordJoin").href=DISCORD_INVITE_URL;
 
 cartBtn.addEventListener("click", () => { cartOverlay.hidden = false; renderCartPanel(); });
 cartClose.addEventListener("click", () => { cartOverlay.hidden = true; });
