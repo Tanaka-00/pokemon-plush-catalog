@@ -4576,7 +4576,10 @@ function render(){
   return list;
 }
 
-const CART_KEY = "pkm_plush_cart_v1";
+// v2: cart is keyed by JAN code, so it survives stock refreshes reordering the list.
+const CART_KEY = "pkm_plush_cart_v2";
+let productById = new Map();
+function byId(id){ return productById.get(String(id)); }
 let cart = {};
 try {
   const saved = JSON.parse(localStorage.getItem(CART_KEY) || "{}");
@@ -4585,10 +4588,10 @@ try {
 
 function saveCart(){ try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch(e) {} }
 const MIN_ORDER = 50000;
-function cartCount(){ return Object.values(cart).reduce((a,b)=>a+b, 0); }
+function cartCount(){ return Object.entries(cart).reduce((a,[id,q])=> byId(id) ? a+q : a, 0); }
 function cartTotal(){
   return Object.entries(cart).reduce((sum,[id,qty]) => {
-    const p = products[Number(id)];
+    const p = byId(id);
     return p ? sum + p.p*qty : sum;
   }, 0);
 }
@@ -4598,7 +4601,7 @@ function setQty(id, qty){
   if(qty === 0) delete cart[id]; else cart[id] = qty;
   saveCart();
   const row = document.querySelector(`[data-cart-row="${id}"]`);
-  if(row) renderCartRow(row, products[id]);
+  if(row && byId(id)) renderCartRow(row, byId(id));
   updateCartUI();
 }
 
@@ -4636,13 +4639,13 @@ function updateCartUI(){
 }
 
 function renderCartPanel(){
-  const ids = Object.keys(cart).map(Number).filter(id => cart[id] > 0);
+  const ids = Object.keys(cart).filter(id => cart[id] > 0 && byId(id));
   if(ids.length === 0){
     cartItemsEl.innerHTML = `<div class="cartEmpty">Your cart is empty.<br>Tap "Add to Cart" on any item to get started.</div>`;
   } else {
     cartItemsEl.innerHTML = "";
     for(const id of ids){
-      const p = products[id];
+      const p = byId(id);
       if(!p) continue;
       const qty = cart[id];
       const displayName = translateName(p.n);
@@ -4684,12 +4687,12 @@ function updateMinOrderNotice(total){
 }
 
 function buildOrderText(){
-  const ids = Object.keys(cart).map(Number).filter(id => cart[id] > 0);
+  const ids = Object.keys(cart).filter(id => cart[id] > 0 && byId(id));
   if(ids.length === 0) return "";
   const lines = ["Pokémon Plush Order — Quote Request", "-----------------------------------"];
   let total = 0, count = 0;
   ids.forEach((id, i) => {
-    const p = products[id];
+    const p = byId(id);
     const qty = cart[id];
     const lineTotal = p.p * qty;
     total += lineTotal; count += qty;
@@ -4749,14 +4752,22 @@ async function boot(){
     const catalog = await catalogRes.json();
     const stock = await stockRes.json();
     const inStockSet = new Set(stock.inStock || []);
+    // A broken refresh must never blank the page: with no stock data, show the whole catalog.
+    const stockKnown = inStockSet.size > 0;
 
     products = catalog
-      .filter(item => inStockSet.has(item.jan || extractJan(item.u)))
-      .map((item, i) => ({ id:i, n:item.n, p:item.p, img:item.img, u:item.u }));
+      .filter(item => !stockKnown || inStockSet.has(item.jan || extractJan(item.u)))
+      .map(item => {
+        const jan = item.jan || extractJan(item.u);
+        return { id:jan, n:item.n, p:item.p, img:item.img, u:item.u };
+      });
+    productById = new Map(products.map(p => [String(p.id), p]));
 
     const totalCatalog = catalog.length.toLocaleString("en-US");
     const inStockCount = products.length.toLocaleString("en-US");
-    subTextEl.textContent = `Showing ${inStockCount} in-stock items out of ${totalCatalog} in the full Pokémon Center plush &amp; mascot line. Sold-out items are hidden automatically and reappear once restocked. Order minimum: ¥50,000 total. Tap "View product page" for full-size photos and details on the official site.`;
+    subTextEl.textContent = stockKnown
+      ? `Showing ${inStockCount} in-stock items out of ${totalCatalog} in the full Pokémon Center plush & mascot line. Sold-out items are hidden automatically and reappear once restocked. Order minimum: ¥50,000 total. Tap "View product page" for full-size photos and details on the official site.`
+      : `Showing all ${totalCatalog} items. Stock status is temporarily unavailable — please check availability on the official product page. Order minimum: ¥50,000 total.`;
     if(stock.lastUpdated){
       const d = new Date(stock.lastUpdated);
       lastUpdatedEl.textContent = "Stock last checked: " + d.toLocaleString();
