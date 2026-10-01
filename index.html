@@ -179,6 +179,14 @@
   }
   .copyBtn:disabled{opacity:.45; cursor:not-allowed;}
   .copyStatus{font-size:12.5px; color:var(--accent-2); font-weight:700; min-height:1.4em;}
+  .fld{display:grid;gap:4px;font-size:12.5px;font-weight:700}
+  .fld input{width:100%;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:var(--surface-2);color:var(--ink);font-size:14px}
+  .fld input[aria-invalid="true"]{border-color:var(--accent)}
+  .orderCode{font-family:ui-monospace,Consolas,monospace;font-size:19px;font-weight:800;letter-spacing:.05em;background:var(--accent);color:var(--accent-ink);padding:5px 12px;border-radius:6px;display:inline-block}
+  .tSteps{margin:8px 0;padding-left:20px;font-size:13px;display:grid;gap:4px}
+  .discordBtn{display:block;text-align:center;padding:11px 14px;border-radius:999px;background:#5865f2;color:#fff;font-weight:800;text-decoration:none}
+  .partBtns{display:grid;gap:6px;margin-top:8px}
+  .partBtns button{padding:9px 12px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-weight:700;cursor:pointer}
   .minOrderNotice{
     font-size:12.5px; font-weight:700; padding:9px 12px; border-radius:8px;
     background:var(--surface-2); border:1px solid var(--line); color:var(--ink-soft);
@@ -246,8 +254,20 @@
     <div class="cartFoot">
       <div class="cartTotalRow"><span>Total (<span id="cartTotalCount">0</span> items)</span><span id="cartTotalPrice">¥0</span></div>
       <div class="minOrderNotice" id="minOrderNotice"></div>
-      <button class="copyBtn" id="copyOrder" type="button">Copy Order Summary</button>
+      <label class="fld" for="dcName">Discord username<input id="dcName" autocomplete="username" placeholder="e.g. sakura_123"></label>
+      <label class="fld" for="dcCountry">Country / region<input id="dcCountry" autocomplete="country-name" placeholder="e.g. United States"></label>
+      <button class="copyBtn" id="copyOrder" type="button">Copy my order</button>
       <div class="copyStatus" id="copyStatus"></div>
+      <div id="ticketSteps" hidden>
+        <div class="orderCode" id="orderCode"></div>
+        <ol class="tSteps">
+          <li>Open <strong>#create-ticket</strong> in our Discord.</li>
+          <li>Tap <strong>Create ticket</strong>. Already have an open ticket with us? Use that one instead.</li>
+          <li>Paste your order in the ticket<span id="partNote"></span>.</li>
+        </ol>
+        <a class="discordBtn" id="discordBtn" target="_blank" rel="noopener">Open #create-ticket in Discord ↗</a>
+        <div id="partBtns" class="partBtns"></div>
+      </div>
       <textarea id="orderText" readonly hidden onclick="this.select()"></textarea>
     </div>
   </div>
@@ -4587,7 +4607,7 @@ try {
 } catch(e) { cart = {}; }
 
 function saveCart(){ try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch(e) {} }
-const MIN_ORDER = 50000;
+const MIN_ORDER = 20000;
 function cartCount(){ return Object.entries(cart).reduce((a,[id,q])=> byId(id) ? a+q : a, 0); }
 function cartTotal(){
   return Object.entries(cart).reduce((sum,[id,qty]) => {
@@ -4676,63 +4696,66 @@ function renderCartPanel(){
   updateMinOrderNotice(total);
   orderTextEl.hidden = true;
   copyStatusEl.textContent = "";
+  document.getElementById("ticketSteps").hidden = true;
 }
 
 function updateMinOrderNotice(total){
   const met = total >= MIN_ORDER;
   minOrderNoticeEl.className = "minOrderNotice " + (met ? "metOk" : "metNo");
   minOrderNoticeEl.textContent = met
-    ? `✓ This order meets the ¥50,000 order minimum.`
+    ? `✓ This order meets the ¥20,000 order minimum.`
     : `Note: the order minimum is ${yen(MIN_ORDER)} total.`;
 }
 
-function buildOrderText(){
+const DISCORD_TICKET_URL = "https://discord.com/channels/1494195048559018084/1494226693865472020";
+function orderCodeGen(){const a="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";let r="";for(let i=0;i<4;i++)r+=a[Math.floor(Math.random()*a.length)];const d=new Date();return `PKP-${String(d.getMonth()+1).padStart(2,"0")}${String(d.getDate()).padStart(2,"0")}-${r}`}
+function buildOrderLines(code, who){
   const ids = Object.keys(cart).filter(id => cart[id] > 0 && byId(id));
-  if(ids.length === 0) return "";
-  const lines = ["Pokémon Plush Order — Quote Request", "-----------------------------------"];
+  if(ids.length === 0) return null;
+  const lines = [`Pokémon Plush order ${code}`, `Discord: ${who.d} | Country: ${who.c}`, "---"];
   let total = 0, count = 0;
-  ids.forEach((id, i) => {
-    const p = byId(id);
-    const qty = cart[id];
-    const lineTotal = p.p * qty;
+  ids.forEach(id => {
+    const p = byId(id); const qty = cart[id]; const lineTotal = p.p * qty;
     total += lineTotal; count += qty;
-    lines.push(`${i+1}. ${translateName(p.n)}  x${qty}  —  ${yen(p.p)} each = ${yen(lineTotal)}`);
-    lines.push(`   ${p.u}`);
+    let nm = translateName(p.n); if(nm.length>70) nm = nm.slice(0,69)+"…";
+    lines.push(`${qty}x ${nm} [${p.id}] ${yen(lineTotal)}`);
   });
-  lines.push("-----------------------------------");
-  lines.push(`Total: ${yen(total)} (${count} items, JPY incl. handling fee)`);
-  if(total < MIN_ORDER){
-    lines.push(`(Note: order minimum is ${yen(MIN_ORDER)} total.)`);
-  }
-  return lines.join("\n");
+  lines.push("---", `Total: ${count} items, ${yen(total)} (JPY incl. handling fee, shipping not included)`);
+  if(total < MIN_ORDER) lines.push(`(Order minimum is ${yen(MIN_ORDER)} total)`);
+  return lines;
 }
+function splitParts(L,max){const P=[];let cur="";for(const l of L){if(cur&&cur.length+l.length+1>max){P.push(cur);cur=""}cur+=(cur?"\n":"")+l}if(cur)P.push(cur);return P}
+async function copyText(text){
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch(e){ try { orderTextEl.value=text; orderTextEl.hidden=false; orderTextEl.removeAttribute("readonly"); orderTextEl.focus(); orderTextEl.select(); const ok=document.execCommand("copy"); orderTextEl.setAttribute("readonly","readonly"); return ok; } catch(e2){ return false; } }
+}
+const dcName=document.getElementById("dcName"), dcCountry=document.getElementById("dcCountry");
+try{const w=JSON.parse(localStorage.getItem("pkp-who")||"null");if(w){dcName.value=w.d||"";dcCountry.value=w.c||""}}catch(e){}
+document.getElementById("discordBtn").href=DISCORD_TICKET_URL;
 
 cartBtn.addEventListener("click", () => { cartOverlay.hidden = false; renderCartPanel(); });
 cartClose.addEventListener("click", () => { cartOverlay.hidden = true; });
 cartOverlay.addEventListener("click", (e) => { if(e.target === cartOverlay) cartOverlay.hidden = true; });
 
 copyOrderBtn.addEventListener("click", async () => {
-  const text = buildOrderText();
-  if(!text){ copyStatusEl.textContent = "Your cart is empty."; return; }
-  orderTextEl.value = text;
-  orderTextEl.hidden = false;
-  let ok = false;
-  try {
-    await navigator.clipboard.writeText(text);
-    ok = true;
-  } catch(e) {
-    try {
-      orderTextEl.removeAttribute("readonly");
-      orderTextEl.focus();
-      orderTextEl.select();
-      ok = document.execCommand("copy");
-      orderTextEl.setAttribute("readonly", "readonly");
-    } catch(e2) { ok = false; }
-  }
+  const who={d:dcName.value.trim().replace(/^@/,""),c:dcCountry.value.trim()};
+  dcName.setAttribute("aria-invalid",String(!who.d)); dcCountry.setAttribute("aria-invalid",String(!who.c));
+  if(!who.d||!who.c){ copyStatusEl.textContent="Please enter your Discord username and country so we can find your ticket."; return; }
+  try{localStorage.setItem("pkp-who",JSON.stringify(who))}catch(e){}
+  const code=orderCodeGen(); const L=buildOrderLines(code,who);
+  if(!L){ copyStatusEl.textContent = "Your cart is empty."; return; }
+  const full=L.join("\n"); const parts=full.length>3900?splitParts(L,1900):[full];
+  orderTextEl.value=parts[0];
+  document.getElementById("orderCode").textContent=code;
+  document.getElementById("partNote").textContent=parts.length>1?` — your order is long, so paste it in ${parts.length} parts, one message each`:"";
+  const pb=document.getElementById("partBtns"); pb.innerHTML="";
+  parts.forEach((t,i)=>{const bt=document.createElement("button");bt.type="button";bt.textContent=parts.length>1?`Copy part ${i+1} of ${parts.length}`:"Copy again";bt.onclick=async()=>{const ok=await copyText(t);copyStatusEl.textContent=ok?(parts.length>1?`Part ${i+1} copied. Paste it, then copy the next part.`:"Copied! Paste it in your Discord ticket."):"Couldn't auto-copy. Select the text below and copy it yourself.";};pb.appendChild(bt)});
+  document.getElementById("ticketSteps").hidden=false;
+  const ok=await copyText(parts[0]);
   copyStatusEl.textContent = ok
-    ? "Copied! Paste it into LINE, Instagram DM, or email to send your order."
-    : "Couldn't auto-copy — tap the box below, select all, and copy manually.";
-  if(!ok){ orderTextEl.focus(); orderTextEl.select(); }
+    ? (parts.length>1?"Part 1 copied. Paste it in your ticket, then come back for part 2.":"Copied! Now paste it in your Discord ticket.")
+    : "Couldn't auto-copy. Select the text below and copy it yourself.";
+  if(!ok){ orderTextEl.hidden=false; orderTextEl.focus(); orderTextEl.select(); }
 });
 
 qEl.addEventListener("input", render);
@@ -4766,8 +4789,8 @@ async function boot(){
     const totalCatalog = catalog.length.toLocaleString("en-US");
     const inStockCount = products.length.toLocaleString("en-US");
     subTextEl.textContent = stockKnown
-      ? `Showing ${inStockCount} in-stock items out of ${totalCatalog} in the full Pokémon Center plush & mascot line. Sold-out items are hidden automatically and reappear once restocked. Order minimum: ¥50,000 total. Tap "View product page" for full-size photos and details on the official site.`
-      : `Showing all ${totalCatalog} items. Stock status is temporarily unavailable — please check availability on the official product page. Order minimum: ¥50,000 total.`;
+      ? `Showing ${inStockCount} in-stock items out of ${totalCatalog} in the full Pokémon Center plush & mascot line. Sold-out items are hidden automatically and reappear once restocked. Order minimum: ¥20,000 total. Add items, open the cart, then copy your order and paste it in a ticket on our Discord. Tap "View product page" for full-size photos and details on the official site.`
+      : `Showing all ${totalCatalog} items. Stock status is temporarily unavailable — please check availability on the official product page. Order minimum: ¥20,000 total.`;
     if(stock.lastUpdated){
       const d = new Date(stock.lastUpdated);
       lastUpdatedEl.textContent = "Stock last checked: " + d.toLocaleString();
